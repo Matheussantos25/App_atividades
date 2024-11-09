@@ -50,7 +50,6 @@ def get_rank(progresso):
         if lower <= progresso < upper:
             return rank, img
     return 'Challenger', 'imagens/challenger.png'
-
 # Função para gerar desafios diários com múltiplos exercícios
 def gerar_desafios_diarios(df_exercicios, df_tarefas):
     hoje = date.today()
