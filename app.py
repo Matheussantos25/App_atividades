@@ -1,277 +1,252 @@
 import streamlit as st
-import csv
 import pandas as pd
 import matplotlib.pyplot as plt
-from datetime import datetime, time
+import seaborn as sns
+from datetime import datetime, date, timedelta
+import time as tm
+import shutil
+import os
+
+# Configurar estilo do Matplotlib
+plt.style.use('ggplot')
 
 # Nome do arquivo CSV
 arquivo_csv = 'exercicios_diarios.csv'
+backup_csv = 'exercicios_diarios_backup.csv'
 
-# Cabeçalho do CSV
-cabecalho = ['Dia', 'Tipo de Exercício', 'Repetições Totais', 'Número de Séries', 'Duração (min)', 'Horário', 'Intervalo entre Séries (min)']
+# Função para criar um backup dos dados
+def criar_backup():
+    if os.path.exists(arquivo_csv):
+        shutil.copy(arquivo_csv, backup_csv)
 
-# Função para adicionar um novo registro de exercício
-def adicionar_exercicio(data_exercicio, tipo_exercicio, repeticoes_totais, numero_series, duracao, horario, intervalo_series):
-    dia_formatado = data_exercicio.strftime('%d/%m/%Y')
-
-    # Adicionar os dados no arquivo CSV
-    with open(arquivo_csv, 'a', newline='', encoding='utf-8') as arquivo:
-        escritor_csv = csv.writer(arquivo)
-        if arquivo.tell() == 0:
-            escritor_csv.writerow(cabecalho)
-        escritor_csv.writerow([dia_formatado, tipo_exercicio, repeticoes_totais, numero_series, duracao, horario, intervalo_series])
-
-    st.success("Registro adicionado com sucesso!")
-
-# Função para categorizar o período do dia
-def categorizar_periodo_dia(horario):
-    if isinstance(horario, time):
-        if time(5, 0) <= horario < time(12, 0):
-            return 'Manhã'
-        elif time(12, 0) <= horario < time(18, 0):
-            return 'Tarde'
-        elif time(18, 0) <= horario <= time(23, 59):
-            return 'Noite'
-        else:
-            return 'Madrugada'
-    return 'Madrugada'
-
-# Função para carregar e processar dados
+# Carregar dados
 def carregar_dados():
     try:
-        df = pd.read_csv(arquivo_csv, encoding='utf-8')
-    except UnicodeDecodeError:
-        df = pd.read_csv(arquivo_csv, encoding='ISO-8859-1')
-    
-    # Converter a coluna 'Dia' para datetime
-    df['Dia'] = pd.to_datetime(df['Dia'], format='%d/%m/%Y')
-
-    # Converter a coluna 'Horário' para datetime.time
-    df['Horário'] = pd.to_datetime(df['Horário'], format='%H:%M', errors='coerce').dt.time
-
-    # Adicionar a coluna 'Período do Dia'
-    df['Período do Dia'] = df['Horário'].apply(categorizar_periodo_dia)
-
-    # Converter colunas numéricas para tipos apropriados
-    colunas_numericas = ['Repetições Totais', 'Número de Séries', 'Duração (min)', 'Intervalo entre Séries (min)']
-    for coluna in colunas_numericas:
-        df[coluna] = pd.to_numeric(df[coluna], errors='coerce').fillna(0)
-
+        df = pd.read_csv(arquivo_csv)
+        df['Dia'] = pd.to_datetime(df['Dia'], format='%d/%m/%Y', errors='coerce')
+        df = df.dropna(subset=['Dia'])  # Remover linhas com datas inválidas
+        df['Tipo de Exercício'] = df['Tipo de Exercício'].str.strip().str.lower()
+    except FileNotFoundError:
+        df = pd.DataFrame(columns=[
+            'Dia',
+            'Tipo de Exercício',
+            'Repetições Totais',
+            'Número de Séries',
+            'Duração (min)',
+            'Horário',
+            'Intervalo entre Séries (min)'
+        ])
+        df.to_csv(arquivo_csv, index=False)
     return df
 
-# Função para plotar gráfico de progresso com base na data
-def plotar_progresso(df, tipo_exercicio, periodo, data_inicio, data_fim):
-    if not df.empty:
-        df_filtrado = df[df['Tipo de Exercício'] == tipo_exercicio]
-        df_filtrado = df_filtrado[(df_filtrado['Dia'] >= data_inicio) & (df_filtrado['Dia'] <= data_fim)]
+# Salvar dados
+def salvar_dados(df):
+    criar_backup()  # Criar um backup antes de salvar novos dados
+    df.to_csv(arquivo_csv, index=False)
 
-        if df_filtrado.empty:
-            st.warning("Nenhum dado disponível para o período selecionado.")
-            return
+# Função para adicionar exercício
+def adicionar_exercicio():
+    st.header("Adicionar Exercício")
+    col1, col2 = st.columns(2)
+    with col1:
+        data_exercicio = st.date_input("Escolha a data", datetime.now())
+    with col2:
+        tipo_exercicio = st.selectbox("Escolha o tipo de exercício:", [
+            'flexões', 'agachamento', 'corrida', 'pular corda', 'andar de bicicleta', 'prancha', 'barra sem peso', 'barra com peso'
+        ])
+    repeticoes_totais = st.number_input("Digite o número total de repetições:", min_value=0, step=1)
+    numero_series = st.number_input("Digite o número de séries:", min_value=1, step=1)
+    duracao = st.text_input("Digite a duração de cada série (em minutos): (Se não se aplica, deixe em branco)")
+    horario = st.text_input("Digite o horário do exercício (HH:MM):")
+    intervalo_series = st.number_input("Digite o tempo de intervalo entre as séries (em minutos):", min_value=0, step=10)
 
-        # Selecionar apenas colunas numéricas para soma
-        colunas_numericas = ['Repetições Totais', 'Número de Séries', 'Duração (min)', 'Intervalo entre Séries (min)']
-        
-        if periodo == 'Diário':
-            df_agrupado = df_filtrado.groupby('Dia')[colunas_numericas].sum().reset_index()
-            x = df_agrupado['Dia']
-            xlabel = 'Data'
-            plt.figure(figsize=(12, 6))
-            plt.plot(x, df_agrupado['Repetições Totais'], marker='o', linestyle='-', color='b')
-            plt.title(f"Progresso de {tipo_exercicio} por {periodo}")
-            plt.xlabel(xlabel)
-            plt.ylabel("Repetições Totais")
-            plt.grid(True)
-            plt.tight_layout()
-        elif periodo == 'Semana':
-            df_agrupado = df_filtrado.resample('W-MON', on='Dia')[colunas_numericas].sum().reset_index()
-            x = df_agrupado['Dia'].dt.strftime('Semana %U')
-            xlabel = 'Semana'
-            plt.figure(figsize=(12, 6))
-            plt.bar(x, df_agrupado['Repetições Totais'], color='skyblue')
-            for i, v in enumerate(df_agrupado['Repetições Totais']):
-                plt.text(i, v + 5, str(v), ha='center', va='bottom')
-            plt.title(f"Progresso de {tipo_exercicio} por {periodo}")
-            plt.xlabel(xlabel)
-            plt.ylabel("Repetições Totais")
-            plt.grid(axis='y')
-            plt.tight_layout()
-        elif periodo == 'Mês':
-            df_agrupado = df_filtrado.resample('M', on='Dia')[colunas_numericas].sum().reset_index()
-            x = df_agrupado['Dia'].dt.strftime('Mês %m')
-            xlabel = 'Mês'
-            plt.figure(figsize=(12, 6))
-            plt.bar(x, df_agrupado['Repetições Totais'], color='skyblue')
-            for i, v in enumerate(df_agrupado['Repetições Totais']):
-                plt.text(i, v + 5, str(v), ha='center', va='bottom')
-            plt.title(f"Progresso de {tipo_exercicio} por {periodo}")
-            plt.xlabel(xlabel)
-            plt.ylabel("Repetições Totais")
-            plt.grid(axis='y')
-            plt.tight_layout()
-        elif periodo == 'Semestre':
-            df_agrupado = df_filtrado.resample('6M', on='Dia')[colunas_numericas].sum().reset_index()
-            x = df_agrupado['Dia']
-            xlabel = 'Semestre'
-            plt.figure(figsize=(12, 6))
-            plt.bar(x, df_agrupado['Repetições Totais'], color='skyblue')
-            for i, v in enumerate(df_agrupado['Repetições Totais']):
-                plt.text(i, v + 5, str(v), ha='center', va='bottom')
-            plt.title(f"Progresso de {tipo_exercicio} por {periodo}")
-            plt.xlabel(xlabel)
-            plt.ylabel("Repetições Totais")
-            plt.grid(axis='y')
-            plt.tight_layout()
-        st.pyplot(plt)
-    else:
-        st.warning("Nenhum dado disponível para visualização.")
-
-# Função para calcular métricas do período selecionado
-def calcular_metricas(df, tipo_exercicio, data_inicio, data_fim):
-    df_filtrado = df[(df['Tipo de Exercício'] == tipo_exercicio) & 
-                     (df['Dia'] >= data_inicio) & (df['Dia'] <= data_fim)]
-    
-    if not df_filtrado.empty:
-        total_repeticoes = df_filtrado['Repetições Totais'].sum()
-        media_repeticoes = df_filtrado['Repetições Totais'].mean()
-        dia_mais_repeticoes = df_filtrado.loc[df_filtrado['Repetições Totais'].idxmax()]['Dia']
-        repeticoes_dia_mais = df_filtrado['Repetições Totais'].max()
-        
-        return total_repeticoes, media_repeticoes, dia_mais_repeticoes, repeticoes_dia_mais
-    else:
-        return 0, 0, None, 0
-
-# Função para plotar gráfico de pizza de distribuição dos horários
-def plotar_pizza_periodo_dia(df, tipo_exercicio, data_inicio, data_fim):
-    if not df.empty:
-        df_filtrado = df[(df['Tipo de Exercício'] == tipo_exercicio) & 
-                         (df['Dia'] >= data_inicio) & (df['Dia'] <= data_fim)]
-        if df_filtrado.empty:
-            st.warning("Nenhum dado disponível para o período selecionado.")
-            return
-
-        # Contar os períodos do dia
-        periodo_contagem = df_filtrado['Período do Dia'].value_counts()
-
-        # Plotar gráfico de pizza
-        plt.figure(figsize=(8, 8))
-        plt.pie(periodo_contagem, labels=periodo_contagem.index, autopct='%1.1f%%', startangle=90, colors=['#FFA07A', '#20B2AA', '#9370DB', '#FF6347'])
-        plt.title(f"Distribuição dos Períodos do Dia para {tipo_exercicio}")
-        plt.tight_layout()
-        st.pyplot(plt)
-    else:
-        st.warning("Nenhum dado disponível para visualização.")
-
-# Função para plotar o top 5 horários mais usados com base na faixa de hora
-def plotar_top5_horarios(df, tipo_exercicio, data_inicio, data_fim):
-    if not df.empty:
-        df_filtrado = df[(df['Tipo de Exercício'] == tipo_exercicio) & 
-                         (df['Dia'] >= data_inicio) & (df['Dia'] <= data_fim)]
-        if df_filtrado.empty:
-            st.warning("Nenhum dado disponível para o período selecionado.")
-            return
-
-        # Extrair a faixa de hora e contar as ocorrências
-        df_filtrado['Faixa de Hora'] = df_filtrado['Horário'].apply(lambda x: x.hour if pd.notnull(x) else None)
-        top5_horarios = df_filtrado['Faixa de Hora'].value_counts().nlargest(5)
-
-        if not top5_horarios.empty:
-            # Plotar gráfico de barras
-            plt.figure(figsize=(10, 6))
-            plt.bar(top5_horarios.index, top5_horarios.values, color='skyblue')
-            plt.xlabel('Hora do Dia')
-            plt.ylabel('Número de Exercícios')
-            plt.title(f'Top 5 Horários Mais Usados para {tipo_exercicio}')
-            plt.xticks(top5_horarios.index)
-            plt.tight_layout()
-            st.pyplot(plt)
+    if st.button("Adicionar Exercício"):
+        if horario:
+            try:
+                datetime.strptime(horario, '%H:%M')
+                nova_entrada = {
+                    'Dia': data_exercicio.strftime('%d/%m/%Y'),
+                    'Tipo de Exercício': tipo_exercicio.strip().lower(),
+                    'Repetições Totais': repeticoes_totais,
+                    'Número de Séries': numero_series,
+                    'Duração (min)': duracao if duracao else None,
+                    'Horário': horario,
+                    'Intervalo entre Séries (min)': intervalo_series
+                }
+                df = carregar_dados()
+                df = pd.concat([df, pd.DataFrame([nova_entrada])], ignore_index=True)
+                salvar_dados(df)
+                st.success("Exercício adicionado com sucesso!")
+            except ValueError:
+                st.error("Formato de horário inválido. Use HH:MM.")
         else:
-            st.warning("Nenhum dado disponível para o Top 5 horários.")
-    else:
-        st.warning("Nenhum dado disponível para visualização.")
+            st.error("Por favor, insira o horário do exercício.")
 
-# Interface do usuário
-st.title("Registro de Exercícios Diários")
+# Funções de plotagem
+def plotar_progresso(df, exercicio, data_inicio, data_fim):
+    # Filtrar os dados
+    df_filtrado = df[
+        (df['Tipo de Exercício'] == exercicio) &
+        (df['Dia'] >= data_inicio) &
+        (df['Dia'] <= data_fim)
+    ]
 
-# Layout em colunas para melhor organização
-col1, col2 = st.columns(2)
+    if df_filtrado.empty:
+        st.write("Sem dados para o período selecionado.")
+        return
 
-with col1:
-    data_exercicio = st.date_input("Escolha a data", datetime.now())
+    # Agrupar por dia e somar as repetições
+    progresso_diario = df_filtrado.groupby('Dia')['Repetições Totais'].sum().reset_index()
 
-with col2:
-    tipo_exercicio = st.selectbox("Escolha o tipo de exercício:", 
-                                   ['Flexão', 'Barra Sem Peso', 'Barra Com Peso', 'Agachamento', 'Pular Corda', 'Andar de Bike', 'Prancha'])
+    # Criar um intervalo de datas completo
+    todas_as_datas = pd.date_range(start=data_inicio, end=data_fim)
 
-repeticoes_totais = st.text_input("Digite o número total de repetições:")
-numero_series = st.text_input("Digite o número de séries:")
-duracao = st.text_input("Digite a duração de cada série (em minutos): (Se não se aplica, deixe em branco)")
-horario = st.text_input("Digite o horário do exercício (HH:MM):")
-intervalo_series = st.text_input("Digite o tempo de intervalo entre as séries (em minutos):")
+    # Reindexar o DataFrame para incluir todas as datas, preenchendo com zero onde não há dados
+    progresso_diario = progresso_diario.set_index('Dia').reindex(todas_as_datas, fill_value=0).rename_axis('Dia').reset_index()
 
-if st.button("Adicionar Exercício"):
-    if horario:
+    # Plotar o progresso
+    plt.figure(figsize=(10, 5))
+    plt.plot(progresso_diario['Dia'], progresso_diario['Repetições Totais'], marker='o')
+    plt.title(f'Progresso de Repetições Totais para {exercicio.capitalize()}')
+    plt.xlabel('Data')
+    plt.ylabel('Repetições Totais')
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    st.pyplot(plt)
+
+def plotar_pizza_periodo_dia(df, exercicio, data_inicio, data_fim):
+    df_filtrado = df[
+        (df['Tipo de Exercício'] == exercicio) &
+        (df['Dia'] >= data_inicio) &
+        (df['Dia'] <= data_fim)
+    ]
+    if df_filtrado.empty:
+        st.write("Sem dados para o período selecionado.")
+        return
+    def classificar_periodo(horario):
         try:
-            datetime.strptime(horario, '%H:%M')
-        except ValueError:
-            st.error("Formato de horário inválido. Use HH:MM.")
-        else:
-            adicionar_exercicio(data_exercicio, tipo_exercicio, repeticoes_totais, numero_series, duracao, horario, intervalo_series)
-    else:
-        adicionar_exercicio(data_exercicio, tipo_exercicio, repeticoes_totais, numero_series, duracao, horario, intervalo_series)
+            hora = int(horario.split(':')[0])
+            if 5 <= hora < 12:
+                return 'Manhã'
+            elif 12 <= hora < 18:
+                return 'Tarde'
+            else:
+                return 'Noite'
+        except:
+            return 'Desconhecido'
+    df_filtrado['Período do Dia'] = df_filtrado['Horário'].apply(classificar_periodo)
+    distribuicao = df_filtrado['Período do Dia'].value_counts()
+    plt.figure(figsize=(6, 6))
+    plt.pie(distribuicao, labels=distribuicao.index, autopct='%1.1f%%', startangle=140)
+    plt.axis('equal')
+    st.pyplot(plt)
+
+def plotar_top5_horarios(df, exercicio, data_inicio, data_fim):
+    df_filtrado = df[
+        (df['Tipo de Exercício'] == exercicio) &
+        (df['Dia'] >= data_inicio) &
+        (df['Dia'] <= data_fim)
+    ]
+    if df_filtrado.empty:
+        st.write("Sem dados para o período selecionado.")
+        return
+    horarios = df_filtrado['Horário'].value_counts().head(5)
+    plt.figure(figsize=(8, 4))
+    sns.barplot(x=horarios.index, y=horarios.values)
+    plt.title(f'Top 5 Horários Mais Usados para {exercicio.capitalize()}')
+    plt.xlabel('Horário')
+    plt.ylabel('Frequência')
+    st.pyplot(plt)
+
+def calcular_metricas(df, exercicio, data_inicio, data_fim):
+    df_filtrado = df[
+        (df['Tipo de Exercício'] == exercicio) &
+        (df['Dia'] >= data_inicio) &
+        (df['Dia'] <= data_fim)
+    ]
+    if df_filtrado.empty:
+        return 0, 0, None, 0
+    total_repeticoes = df_filtrado['Repetições Totais'].sum()
+    dias_unicos = df_filtrado['Dia'].nunique()
+    media_repeticoes = total_repeticoes / dias_unicos if dias_unicos else 0
+    progresso_diario = df_filtrado.groupby('Dia')['Repetições Totais'].sum().reset_index()
+    dia_mais_repeticoes = progresso_diario.loc[progresso_diario['Repetições Totais'].idxmax(), 'Dia']
+    repeticoes_dia_mais = progresso_diario['Repetições Totais'].max()
+    return total_repeticoes, media_repeticoes, dia_mais_repeticoes, repeticoes_dia_mais
 
 # Carregar dados
 df = carregar_dados()
 
-# Selecionar o tipo de exercício e o período para visualização
+# Interface do aplicativo
+st.title("Relatório Físico")
+
+# Seção para adicionar exercícios
+adicionar_exercicio()
+
+# Seção para visualizar estatísticas
+st.header("Estatísticas")
+
 if not df.empty:
-    st.header("Visualização do Progresso")
-    
-    col3, col4 = st.columns(2)
+    df['Tipo de Exercício'] = df['Tipo de Exercício'].str.strip().str.lower()
+    df = df.sort_values('Dia')
+    exercicios_disponiveis = df['Tipo de Exercício'].unique()
+    exercicio_selecionado = st.selectbox("Selecione o exercício:", exercicios_disponiveis)
+    periodo_opcoes = ['7 dias', '14 dias', '30 dias', 'Personalizado']
+    periodo_selecionado = st.selectbox("Selecione o período:", periodo_opcoes)
 
-    with col3:
-        exercicio_selecionado = st.selectbox("Escolha o tipo de exercício para ver o progresso:", df['Tipo de Exercício'].unique())
+    if periodo_selecionado == 'Personalizado':
+        col1, col2 = st.columns(2)
+        with col1:
+            data_minima = df['Dia'].min()
+            if pd.isna(data_minima):
+                data_minima = datetime.today()
+            data_inicio = st.date_input("Data de início", data_minima.date(), key="data_inicio_personalizado")
+        with col2:
+            data_maxima = df['Dia'].max()
+            if pd.isna(data_maxima):
+                data_maxima = datetime.today()
+            data_fim = st.date_input("Data de fim", data_maxima.date(), key="data_fim_personalizado")
+    else:
+        dias = int(periodo_selecionado.split()[0])
+        data_maxima = df['Dia'].max()
+        if pd.isna(data_maxima):
+            data_maxima = datetime.today()
+        data_fim = data_maxima.date()
+        data_inicio = data_fim - timedelta(days=dias)
 
-    with col4:
-        periodo_selecionado = st.selectbox("Escolha o período:", ['Diário', 'Semana', 'Mês', 'Semestre'])
+    # Converter datas para datetime
+    data_inicio_dt = pd.to_datetime(data_inicio)
+    data_fim_dt = pd.to_datetime(data_fim) + timedelta(days=1) - timedelta(seconds=1)  # Incluir o dia final
 
-    st.subheader("Selecione o intervalo de datas")
+    # Filtrar os dados
+    df_filtrado = df[
+        (df['Tipo de Exercício'] == exercicio_selecionado.lower()) &
+        (df['Dia'] >= data_inicio_dt) &
+        (df['Dia'] <= data_fim_dt)
+    ]
 
-    data_min = df['Dia'].min().date()
-    data_max = df['Dia'].max().date()
-
-    data_inicio = st.date_input("Data de Início", data_min, min_value=data_min, max_value=data_max)
-    data_fim = st.date_input("Data de Fim", data_max, min_value=data_min, max_value=data_max)
-
-    if st.button("Mostrar Gráficos e Métricas"):
-        if data_inicio > data_fim:
-            st.error("A data de início deve ser anterior à data de fim.")
+    if not df_filtrado.empty:
+        total_repeticoes, media_repeticoes, dia_mais_repeticoes, repeticoes_dia_mais = calcular_metricas(
+            df, exercicio_selecionado.lower(), data_inicio_dt, data_fim_dt)
+        # Mostrar métricas
+        st.subheader("Métricas do Período Selecionado")
+        st.write(f"**Total de Repetições:** {total_repeticoes}")
+        st.write(f"**Média de Repetições por Dia:** {media_repeticoes:.2f}")
+        if dia_mais_repeticoes is not None:
+            st.write(f"**Dia com Mais Repetições:** {dia_mais_repeticoes.strftime('%d/%m/%Y')} com {repeticoes_dia_mais} repetições")
         else:
-            # Converter para datetime
-            data_inicio_dt = pd.to_datetime(data_inicio)
-            data_fim_dt = pd.to_datetime(data_fim)
+            st.write("**Dia com Mais Repetições:** N/A")
 
-            # Calcular métricas
-            total_repeticoes, media_repeticoes, dia_mais_repeticoes, repeticoes_dia_mais = calcular_metricas(df, exercicio_selecionado, data_inicio_dt, data_fim_dt)
+        # Mostrar gráficos
+        st.subheader("Progresso de Repetições Totais")
+        plotar_progresso(df, exercicio_selecionado.lower(), data_inicio_dt, data_fim_dt)
 
-            # Mostrar métricas
-            st.subheader("Métricas do Período Selecionado")
-            st.write(f"**Total de Repetições:** {total_repeticoes}")
-            st.write(f"**Média de Repetições por Dia:** {media_repeticoes:.2f}")
-            if dia_mais_repeticoes is not None:
-                st.write(f"**Dia com Mais Repetições:** {dia_mais_repeticoes.strftime('%d/%m/%Y')} com {repeticoes_dia_mais} repetições")
-            else:
-                st.write("**Dia com Mais Repetições:** N/A")
+        st.subheader("Gráfico de Pizza dos Períodos do Dia")
+        plotar_pizza_periodo_dia(df, exercicio_selecionado.lower(), data_inicio_dt, data_fim_dt)
 
-            # Mostrar gráficos
-            st.subheader("Progresso de Repetições Totais")
-            plotar_progresso(df, exercicio_selecionado, periodo_selecionado, data_inicio_dt, data_fim_dt)
-
-            st.subheader("Gráfico de Pizza dos Períodos do Dia")
-            plotar_pizza_periodo_dia(df, exercicio_selecionado, data_inicio_dt, data_fim_dt)
-
-            st.subheader("Top 5 Horários Mais Usados")
-            plotar_top5_horarios(df, exercicio_selecionado, data_inicio_dt, data_fim_dt)
-
+        st.subheader("Top 5 Horários Mais Usados")
+        plotar_top5_horarios(df, exercicio_selecionado.lower(), data_inicio_dt, data_fim_dt)
+    else:
+        st.warning("Nenhum dado disponível para o período selecionado.")
 else:
     st.warning("Nenhum dado disponível. Adicione exercícios para visualizar os gráficos.")
