@@ -57,7 +57,7 @@ def adicionar_exercicio():
         data_exercicio = st.date_input("Escolha a data", datetime.now())
     with col2:
         tipo_exercicio = st.selectbox("Escolha o tipo de exercício:", [
-            'flexões', 'agachamento', 'corrida', 'pular corda', 'andar de bicicleta', 'prancha', 'barra sem peso', 'barra com peso'
+            'flexões', 'abdominal bicicleta','agachamento', 'corrida', 'pular corda', 'andar de bicicleta', 'prancha', 'barra sem peso', 'barra com peso'
         ])
     repeticoes_totais = st.number_input("Digite o número total de repetições:", min_value=0, step=1)
     numero_series = st.number_input("Digite o número de séries:", min_value=1, step=1)
